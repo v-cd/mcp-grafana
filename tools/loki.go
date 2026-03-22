@@ -130,7 +130,7 @@ func (c *Client) makeRequest(ctx context.Context, method, urlPath string, params
 	// Check for non-200 status code
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("loki API returned status code %d: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("API returned status code %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	// Read the response body with a limit to prevent memory issues
@@ -142,7 +142,7 @@ func (c *Client) makeRequest(ctx context.Context, method, urlPath string, params
 
 	// Check if the response is empty
 	if len(bodyBytes) == 0 {
-		return nil, fmt.Errorf("empty response from Loki API")
+		return nil, fmt.Errorf("empty response from API")
 	}
 
 	// Trim any whitespace that might cause JSON parsing issues

@@ -63,6 +63,11 @@ func GenerateEmptyResultHints(ctx HintContext) *EmptyResultHints {
 		hints.PossibleCauses = getLokiCauses(ctx)
 		hints.SuggestedActions = getLokiActions(ctx)
 
+	case "victorialogs":
+		hints.Summary = "The VictoriaLogs query returned no log entries for the specified time range."
+		hints.PossibleCauses = getVictoriaLogsCauses(ctx)
+		hints.SuggestedActions = getVictoriaLogsActions(ctx)
+
 	case "clickhouse":
 		hints.Summary = "The ClickHouse query returned no rows for the specified parameters."
 		hints.PossibleCauses = getClickHouseCauses(ctx)
@@ -155,6 +160,41 @@ func getLokiActions(ctx HintContext) []string {
 	}
 	if strings.Contains(ctx.Query, "=~") {
 		actions = append(actions, "Verify regex patterns are correct - use list_loki_label_values to see actual values")
+	}
+
+	return actions
+}
+
+// getVictoriaLogsCauses returns possible causes for empty VictoriaLogs results
+func getVictoriaLogsCauses(ctx HintContext) []string {
+	causes := []string{
+		"The field filters may not match any log entries",
+		"No logs were ingested during the specified time range",
+		"The LogsQL query may be too restrictive",
+		"The field names or values in the query may be misspelled or incorrect",
+	}
+
+	if strings.Contains(ctx.Query, "AND") || strings.Contains(ctx.Query, "OR") {
+		causes = append(causes, "Boolean operators may be combining conditions that exclude all results")
+	}
+	if strings.Contains(ctx.Query, "|") {
+		causes = append(causes, "Pipeline operations may be filtering out all matching logs")
+	}
+
+	return causes
+}
+
+// getVictoriaLogsActions returns suggested actions for empty VictoriaLogs results
+func getVictoriaLogsActions(ctx HintContext) []string {
+	actions := []string{
+		"Use list_victorialogs_field_names to verify available fields",
+		"Use list_victorialogs_field_values to check values for specific fields",
+		"Use query_victorialogs_stats to check if logs exist for the query",
+		"Try expanding the time range to see if logs exist in a different period",
+	}
+
+	if strings.Contains(ctx.Query, "AND") || strings.Contains(ctx.Query, "|") {
+		actions = append(actions, "Try simplifying the query to just '*' to see if any logs exist")
 	}
 
 	return actions

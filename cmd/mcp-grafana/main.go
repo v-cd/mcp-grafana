@@ -45,7 +45,7 @@ type disabledTools struct {
 	dashboard, folder, oncall, asserts, sift, admin,
 	pyroscope, navigation, proxied, annotations, rendering, cloudwatch, write,
 	examples, clickhouse, searchlogs,
-	runpanelquery bool
+	runpanelquery, victorialogs bool
 }
 
 // Configuration for the Grafana client.
@@ -89,6 +89,7 @@ func (dt *disabledTools) addFlags() {
 	flag.BoolVar(&dt.clickhouse, "disable-clickhouse", false, "Disable ClickHouse tools")
 	flag.BoolVar(&dt.searchlogs, "disable-searchlogs", false, "Disable search logs tools")
 	flag.BoolVar(&dt.runpanelquery, "disable-runpanelquery", false, "Disable run panel query tools")
+	flag.BoolVar(&dt.victorialogs, "disable-victorialogs", false, "Disable VictoriaLogs tools")
 }
 
 func (gc *grafanaConfig) addFlags() {
@@ -129,6 +130,7 @@ func (dt *disabledTools) addTools(s *server.MCPServer) {
 	maybeAddTools(s, tools.AddClickHouseTools, enabledTools, dt.clickhouse, "clickhouse")
 	maybeAddTools(s, tools.AddSearchLogsTools, enabledTools, dt.searchlogs, "searchlogs")
 	maybeAddTools(s, tools.AddRunPanelQueryTools, enabledTools, dt.runpanelquery, "runpanelquery")
+	maybeAddTools(s, tools.AddVictoriaLogsTools, enabledTools, dt.victorialogs, "victorialogs")
 }
 
 func newServer(transport string, dt disabledTools, obs *observability.Observability) (*server.MCPServer, *mcpgrafana.ToolManager) {
