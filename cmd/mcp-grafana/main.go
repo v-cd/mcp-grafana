@@ -64,7 +64,7 @@ type grafanaConfig struct {
 }
 
 func (dt *disabledTools) addFlags() {
-	flag.StringVar(&dt.enabledTools, "enabled-tools", "search,datasource,incident,prometheus,loki,alerting,dashboard,folder,oncall,asserts,sift,pyroscope,navigation,proxied,annotations,rendering", "A comma separated list of tools enabled for this server. Can be overwritten entirely or by disabling specific components, e.g. --disable-search.")
+	flag.StringVar(&dt.enabledTools, "enabled-tools", "search,datasource,incident,prometheus,loki,alerting,dashboard,folder,oncall,asserts,sift,pyroscope,navigation,proxied,annotations,rendering,victorialogs", "A comma separated list of tools enabled for this server. Can be overwritten entirely or by disabling specific components, e.g. --disable-search.")
 	flag.BoolVar(&dt.search, "disable-search", false, "Disable search tools")
 	flag.BoolVar(&dt.datasource, "disable-datasource", false, "Disable datasource tools")
 	flag.BoolVar(&dt.incident, "disable-incident", false, "Disable incident tools")
@@ -183,6 +183,7 @@ Available Capabilities:
 - Dashboards: Search, retrieve, update, and create dashboards. Extract panel queries and datasource information.
 - Datasources: List and fetch details for datasources.
 - Prometheus & Loki: Run PromQL and LogQL queries, retrieve metric/log metadata, and explore label names/values.
+- VictoriaLogs: Run LogsQL queries against VictoriaLogs datasources, list field names/values, and retrieve hit statistics.
 - ClickHouse: Query ClickHouse datasources via Grafana with macro and variable substitution support.
 - Elasticsearch: Query Elasticsearch datasources using Lucene syntax or Query DSL for logs and metrics.
 - Incidents: Search, create, update, and resolve incidents in Grafana Incident.
