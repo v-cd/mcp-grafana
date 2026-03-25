@@ -209,7 +209,7 @@ type QueryVictoriaLogsResult struct {
 // enforceVictoriaLogsLogLimit ensures a log limit value is within acceptable bounds
 func enforceVictoriaLogsLogLimit(ctx context.Context, requestedLimit int) int {
 	config := mcpgrafana.GrafanaConfigFromContext(ctx)
-	maxLimit := config.MaxLokiLogLimit
+	maxLimit := config.MaxVictoriaLogsLogLimit
 	if maxLimit <= 0 {
 		maxLimit = MaxVictoriaLogsLogLimit
 	}

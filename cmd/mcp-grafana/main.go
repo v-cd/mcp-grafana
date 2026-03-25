@@ -61,6 +61,9 @@ type grafanaConfig struct {
 
 	// Loki configuration
 	maxLokiLogLimit int
+
+	// VictoriaLogs configuration
+	maxVictoriaLogsLogLimit int
 }
 
 func (dt *disabledTools) addFlags() {
@@ -103,6 +106,9 @@ func (gc *grafanaConfig) addFlags() {
 
 	// Loki configuration flags
 	flag.IntVar(&gc.maxLokiLogLimit, "max-loki-log-limit", tools.MaxLokiLogLimit, "Maximum number of log lines returned per query_loki_logs call")
+
+	// VictoriaLogs configuration flags
+	flag.IntVar(&gc.maxVictoriaLogsLogLimit, "max-victorialogs-log-limit", tools.MaxVictoriaLogsLogLimit, "Maximum number of log lines returned per query_victorialogs_logs call")
 }
 
 func (dt *disabledTools) addTools(s *server.MCPServer) {
@@ -430,7 +436,8 @@ func main() {
 	// Convert local grafanaConfig to mcpgrafana.GrafanaConfig
 	grafanaConfig := mcpgrafana.GrafanaConfig{
 		Debug:           gc.debug,
-		MaxLokiLogLimit: gc.maxLokiLogLimit,
+		MaxLokiLogLimit:         gc.maxLokiLogLimit,
+		MaxVictoriaLogsLogLimit: gc.maxVictoriaLogsLogLimit,
 	}
 	if gc.tlsCertFile != "" || gc.tlsKeyFile != "" || gc.tlsCAFile != "" || gc.tlsSkipVerify {
 		grafanaConfig.TLSConfig = &mcpgrafana.TLSConfig{

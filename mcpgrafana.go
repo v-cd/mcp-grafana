@@ -182,6 +182,10 @@ type GrafanaConfig struct {
 	// MaxLokiLogLimit is the maximum number of log lines that can be returned
 	// from Loki queries.
 	MaxLokiLogLimit int
+
+	// MaxVictoriaLogsLogLimit is the maximum number of log lines that can be returned
+	// from VictoriaLogs queries.
+	MaxVictoriaLogsLogLimit int
 }
 
 const (

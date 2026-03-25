@@ -109,6 +109,12 @@ The dashboard tools now include several strategies to manage context window usag
 
 - **Search logs:** High-level log search across ClickHouse (OTel format) and Loki datasources.
 
+### VictoriaLogs Querying
+
+- **Query VictoriaLogs logs:** Execute LogsQL queries against VictoriaLogs datasources to retrieve log entries.
+- **Query VictoriaLogs metadata:** Retrieve field names and field values from VictoriaLogs datasources.
+- **Query VictoriaLogs stats:** Retrieve hit count statistics grouped by time buckets to understand log volume.
+
 ### Elasticsearch Querying
 
 > **Note:** Elasticsearch tools are **disabled by default**. To enable them, add `elasticsearch` to your `--enabled-tools` flag.
@@ -280,6 +286,10 @@ Scopes define the specific resources that permissions apply to. Each action requ
 | `list_loki_label_values`          | Loki        | List values for a specific log label                                | `datasources:query`                     | `datasources:uid:loki-uid`                          |
 | `query_loki_stats`                | Loki        | Get statistics about log streams                                    | `datasources:query`                     | `datasources:uid:loki-uid`                          |
 | `query_loki_patterns`             | Loki        | Query detected log patterns to identify common structures           | `datasources:query`                     | `datasources:uid:loki-uid`                          |
+| `query_victorialogs_logs`         | VictoriaLogs | Execute LogsQL queries against VictoriaLogs datasources            | `datasources:query`                     | `datasources:uid:victorialogs-uid`                  |
+| `list_victorialogs_field_names`   | VictoriaLogs | List available field names in VictoriaLogs logs                    | `datasources:query`                     | `datasources:uid:victorialogs-uid`                  |
+| `list_victorialogs_field_values`  | VictoriaLogs | List values for a specific field in VictoriaLogs                   | `datasources:query`                     | `datasources:uid:victorialogs-uid`                  |
+| `query_victorialogs_stats`        | VictoriaLogs | Get hit count statistics from VictoriaLogs                         | `datasources:query`                     | `datasources:uid:victorialogs-uid`                  |
 | `list_clickhouse_tables`          | ClickHouse* | List tables in a ClickHouse database                                | `datasources:query`                     | `datasources:uid:*`                                 |
 | `describe_clickhouse_table`       | ClickHouse* | Get table schema with column types                                  | `datasources:query`                     | `datasources:uid:*`                                 |
 | `query_clickhouse`                | ClickHouse* | Execute SQL queries with macro substitution                         | `datasources:query`                     | `datasources:uid:*`                                 |
@@ -338,6 +348,7 @@ The `mcp-grafana` binary supports various command-line flags for configuration:
 **Tool Configuration:**
 - `--enabled-tools`: Comma-separated list of enabled categories - default: all categories except `admin`, to enable admin tools, add `admin` to the list (e.g., `"search,datasource,...,admin"`)
 - `--max-loki-log-limit`: Maximum number of log lines returned per `query_loki_logs` call - default: `100`. Note: Set this at least 1 below Loki's server-side `max_entries_limit_per_query` to allow truncation detection (the tool requests `limit+1` internally to detect if more data exists).
+- `--max-victorialogs-log-limit`: Maximum number of log lines returned per `query_victorialogs_logs` call - default: `100`. This limit is independent of `--max-loki-log-limit`.
 - `--disable-search`: Disable search tools
 - `--disable-datasource`: Disable datasource tools
 - `--disable-incident`: Disable incident tools
@@ -359,6 +370,7 @@ The `mcp-grafana` binary supports various command-line flags for configuration:
 - `--disable-clickhouse`: Disable ClickHouse tools
 - `--disable-searchlogs`: Disable search_logs tool
 - `--disable-runpanelquery`: Disable run panel query tools
+- `--disable-victorialogs`: Disable VictoriaLogs tools
 
 ### Read-Only Mode
 
