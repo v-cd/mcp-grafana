@@ -17,52 +17,64 @@ import (
 func TestEnforceVictoriaLogsLogLimit(t *testing.T) {
 	tests := []struct {
 		name           string
-		maxLokiLimit   int
+		maxVictoriaLogsLimit   int
 		requestedLimit int
 		expectedLimit  int
 	}{
 		{
 			name:           "default limit when requested is 0",
-			maxLokiLimit:   100,
+			maxVictoriaLogsLimit:   100,
 			requestedLimit: 0,
 			expectedLimit:  DefaultVictoriaLogsLogLimit,
 		},
 		{
 			name:           "default limit when requested is negative",
-			maxLokiLimit:   100,
+			maxVictoriaLogsLimit:   100,
 			requestedLimit: -5,
 			expectedLimit:  DefaultVictoriaLogsLogLimit,
 		},
 		{
 			name:           "requested limit within bounds",
-			maxLokiLimit:   100,
+			maxVictoriaLogsLimit:   100,
 			requestedLimit: 50,
 			expectedLimit:  50,
 		},
 		{
 			name:           "requested limit exceeds max",
-			maxLokiLimit:   100,
+			maxVictoriaLogsLimit:   100,
 			requestedLimit: 150,
 			expectedLimit:  100,
 		},
 		{
 			name:           "fallback to default max when config is 0",
-			maxLokiLimit:   0,
+			maxVictoriaLogsLimit:   0,
 			requestedLimit: 150,
 			expectedLimit:  MaxVictoriaLogsLogLimit,
 		},
 		{
 			name:           "default limit capped to maxLimit when maxLimit is lower",
-			maxLokiLimit:   5,
+			maxVictoriaLogsLimit:   5,
 			requestedLimit: 0,
 			expectedLimit:  5,
+		},
+		{
+			name:                 "custom limit above default max allows higher requests",
+			maxVictoriaLogsLimit: 500,
+			requestedLimit:      300,
+			expectedLimit:       300,
+		},
+		{
+			name:                 "custom limit above default max caps at custom limit",
+			maxVictoriaLogsLimit: 500,
+			requestedLimit:      700,
+			expectedLimit:       500,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := mcpgrafana.GrafanaConfig{
-				MaxLokiLogLimit: tc.maxLokiLimit,
+				MaxVictoriaLogsLogLimit: tc.maxVictoriaLogsLimit,
 			}
 			ctx := mcpgrafana.WithGrafanaConfig(context.Background(), cfg)
 
@@ -70,6 +82,29 @@ func TestEnforceVictoriaLogsLogLimit(t *testing.T) {
 			assert.Equal(t, tc.expectedLimit, result)
 		})
 	}
+}
+
+func TestEnforceVictoriaLogsLogLimitIndependentFromLoki(t *testing.T) {
+	// Setting only MaxLokiLogLimit should NOT affect VictoriaLogs limit.
+	// VictoriaLogs should fall back to its own default (MaxVictoriaLogsLogLimit = 100).
+	cfg := mcpgrafana.GrafanaConfig{
+		MaxLokiLogLimit:         500,
+		MaxVictoriaLogsLogLimit: 0,
+	}
+	ctx := mcpgrafana.WithGrafanaConfig(context.Background(), cfg)
+
+	result := enforceVictoriaLogsLogLimit(ctx, 300)
+	assert.Equal(t, MaxVictoriaLogsLogLimit, result, "VictoriaLogs should NOT inherit Loki's limit")
+
+	// When both are set, each should use its own value.
+	cfg2 := mcpgrafana.GrafanaConfig{
+		MaxLokiLogLimit:         200,
+		MaxVictoriaLogsLogLimit: 1000,
+	}
+	ctx2 := mcpgrafana.WithGrafanaConfig(context.Background(), cfg2)
+
+	result = enforceVictoriaLogsLogLimit(ctx2, 800)
+	assert.Equal(t, 800, result, "VictoriaLogs should use its own limit of 1000, allowing 800")
 }
 
 func TestParseVictoriaLogsJSONLines(t *testing.T) {
