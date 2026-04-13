@@ -345,6 +345,9 @@ The `mcp-grafana` binary supports various command-line flags for configuration:
 - `--metrics`: Enable Prometheus metrics endpoint at `/metrics`
 - `--metrics-address`: Separate address for metrics server (e.g., `:9090`). If empty, metrics are served on the main server
 
+**Session Management:**
+- `--session-idle-timeout-minutes`: Session idle timeout in minutes. Sessions with no activity for this duration are automatically reaped - default: `30`. Set to `0` to disable session reaping. Only relevant for SSE and streamable-http transports.
+
 **Tool Configuration:**
 - `--enabled-tools`: Comma-separated list of enabled categories - default: all categories except `admin`, to enable admin tools, add `admin` to the list (e.g., `"search,datasource,...,admin"`)
 - `--max-loki-log-limit`: Maximum number of log lines returned per `query_loki_logs` call - default: `100`. Note: Set this at least 1 below Loki's server-side `max_entries_limit_per_query` to allow truncation detection (the tool requests `limit+1` internally to detect if more data exists).
@@ -476,6 +479,32 @@ You can add arbitrary HTTP headers to all Grafana API requests using the `GRAFAN
   }
 }
 ```
+
+### Forwarding Headers from the Client (SSE/Streamable-HTTP Only)
+
+When the MCP server runs behind a gateway or reverse proxy that handles SSO (e.g. an AWS ALB with OIDC), each user's session cookie must reach Grafana so it can associate the request with the authenticated user. The `GRAFANA_FORWARD_HEADERS` environment variable enables this by specifying a comma-separated allowlist of header names to copy from the **incoming** HTTP request to every outbound Grafana API request.
+
+This only applies when using SSE (`-t sse`) or streamable-http (`-t streamable-http`) transports. It has no effect in stdio mode.
+
+**Example: forward the session cookie**
+
+```json
+{
+  "env": {
+    "GRAFANA_URL": "https://grafana.internal",
+    "GRAFANA_SERVICE_ACCOUNT_TOKEN": "<your token>",
+    "GRAFANA_FORWARD_HEADERS": "Cookie"
+  }
+}
+```
+
+You can forward multiple headers by separating them with commas:
+
+```
+GRAFANA_FORWARD_HEADERS=Cookie,X-Session-Id
+```
+
+Forwarded headers are merged with any headers defined in `GRAFANA_EXTRA_HEADERS`. If a header name appears in both, the value from the incoming request takes precedence for that request.
 
 2. You have several options to install `mcp-grafana`:
 

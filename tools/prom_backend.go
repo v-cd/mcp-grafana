@@ -33,15 +33,22 @@ type promBackend interface {
 }
 
 // backendForDatasource looks up the datasource type and returns the appropriate backend.
-func backendForDatasource(ctx context.Context, uid string) (promBackend, error) {
+// An optional projectOverride can be passed for Cloud Monitoring datasources to override
+// (or substitute for) the defaultProject configured on the datasource.
+func backendForDatasource(ctx context.Context, uid string, projectOverride ...string) (promBackend, error) {
 	ds, err := getDatasourceByUID(ctx, GetDatasourceByUIDParams{UID: uid})
 	if err != nil {
 		return nil, err
 	}
 
+	proj := ""
+	if len(projectOverride) > 0 {
+		proj = projectOverride[0]
+	}
+
 	switch ds.Type {
 	case "stackdriver":
-		return newCloudMonitoringBackend(ctx, ds)
+		return newCloudMonitoringBackend(ctx, ds, proj)
 	default:
 		// For prometheus, thanos, cortex, mimir, and any other Prometheus-compatible datasource,
 		// use the native Prometheus client via the datasource proxy.
@@ -57,7 +64,9 @@ type prometheusBackend struct {
 
 func newPrometheusBackend(ctx context.Context, uid string, ds *models.DataSource) (*prometheusBackend, error) {
 	cfg := mcpgrafana.GrafanaConfigFromContext(ctx)
-	url := fmt.Sprintf("%s/api/datasources/uid/%s/resources", trimTrailingSlash(cfg.URL), uid)
+	grafanaURL := trimTrailingSlash(cfg.URL)
+	resourcesBase, proxyBase := datasourceProxyPaths(uid)
+	url := grafanaURL + resourcesBase
 
 	rt, err := mcpgrafana.BuildTransport(&cfg, api.DefaultRoundTripper)
 	if err != nil {
@@ -77,6 +86,10 @@ func newPrometheusBackend(ctx context.Context, uid string, ds *models.DataSource
 			rt = &postToGetRoundTripper{underlying: rt}
 		}
 	}
+
+	// Wrap with fallback transport: try /resources first, fall back to /proxy
+	// on 403/500 for compatibility with different managed Grafana deployments.
+	rt = newDatasourceFallbackTransport(rt, resourcesBase, proxyBase)
 
 	c, err := api.NewClient(api.Config{
 		Address:      url,
@@ -103,7 +116,7 @@ func (b *prometheusBackend) Query(ctx context.Context, expr string, queryType st
 		}
 		return result, nil
 	case "instant":
-		result, _, err := b.api.Query(ctx, expr, start)
+		result, _, err := b.api.Query(ctx, expr, end)
 		if err != nil {
 			return nil, fmt.Errorf("querying Prometheus instant: %w", err)
 		}

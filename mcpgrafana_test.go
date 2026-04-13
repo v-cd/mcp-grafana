@@ -1,6 +1,3 @@
-//go:build unit
-// +build unit
-
 package mcpgrafana
 
 import (
@@ -8,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/go-openapi/runtime/client"
@@ -156,6 +154,37 @@ func TestExtractGrafanaInfoFromHeaders(t *testing.T) {
 		config := GrafanaConfigFromContext(ctx)
 		assert.Equal(t, "http://my-test-url.grafana.com", config.URL)
 		assert.Equal(t, "my-test-api-key", config.APIKey)
+	})
+
+	t.Run("with service account token header", func(t *testing.T) {
+		t.Setenv("GRAFANA_URL", "")
+		t.Setenv("GRAFANA_API_KEY", "")
+		t.Setenv("GRAFANA_SERVICE_ACCOUNT_TOKEN", "")
+
+		req, err := http.NewRequest("GET", "http://example.com", nil)
+		require.NoError(t, err)
+		req.Header.Set(grafanaURLHeader, "http://my-test-url.grafana.com")
+		req.Header.Set(grafanaServiceAccountTokenHeader, "my-service-account-token")
+		ctx := ExtractGrafanaInfoFromHeaders(context.Background(), req)
+		config := GrafanaConfigFromContext(ctx)
+		assert.Equal(t, "http://my-test-url.grafana.com", config.URL)
+		assert.Equal(t, "my-service-account-token", config.APIKey)
+	})
+
+	t.Run("service account token header takes precedence over api key header", func(t *testing.T) {
+		t.Setenv("GRAFANA_URL", "")
+		t.Setenv("GRAFANA_API_KEY", "")
+		t.Setenv("GRAFANA_SERVICE_ACCOUNT_TOKEN", "")
+
+		req, err := http.NewRequest("GET", "http://example.com", nil)
+		require.NoError(t, err)
+		req.Header.Set(grafanaURLHeader, "http://my-test-url.grafana.com")
+		req.Header.Set(grafanaServiceAccountTokenHeader, "my-service-account-token")
+		req.Header.Set(grafanaAPIKeyHeader, "my-deprecated-api-key")
+		ctx := ExtractGrafanaInfoFromHeaders(context.Background(), req)
+		config := GrafanaConfigFromContext(ctx)
+		assert.Equal(t, "http://my-test-url.grafana.com", config.URL)
+		assert.Equal(t, "my-service-account-token", config.APIKey)
 	})
 
 	t.Run("no headers, with env", func(t *testing.T) {
@@ -373,11 +402,7 @@ func TestToolTracingInstrumentation(t *testing.T) {
 
 		// Create a mock MCP request
 		request := mcp.CallToolRequest{
-			Params: struct {
-				Name      string    `json:"name"`
-				Arguments any       `json:"arguments,omitempty"`
-				Meta      *mcp.Meta `json:"_meta,omitempty"`
-			}{
+			Params: mcp.CallToolParams{
 				Name: "test_tool",
 				Arguments: map[string]interface{}{
 					"message": "world",
@@ -430,11 +455,7 @@ func TestToolTracingInstrumentation(t *testing.T) {
 
 		// Create a mock MCP request that will cause failure
 		request := mcp.CallToolRequest{
-			Params: struct {
-				Name      string    `json:"name"`
-				Arguments any       `json:"arguments,omitempty"`
-				Meta      *mcp.Meta `json:"_meta,omitempty"`
-			}{
+			Params: mcp.CallToolParams{
 				Name: "failing_tool",
 				Arguments: map[string]interface{}{
 					"shouldFail": true,
@@ -491,11 +512,7 @@ func TestToolTracingInstrumentation(t *testing.T) {
 
 		// Create a mock MCP request
 		request := mcp.CallToolRequest{
-			Params: struct {
-				Name      string    `json:"name"`
-				Arguments any       `json:"arguments,omitempty"`
-				Meta      *mcp.Meta `json:"_meta,omitempty"`
-			}{
+			Params: mcp.CallToolParams{
 				Name: "context_prop_tool",
 				Arguments: map[string]interface{}{
 					"message": "test",
@@ -541,11 +558,7 @@ func TestToolTracingInstrumentation(t *testing.T) {
 
 		// Create a mock MCP request with potentially sensitive data
 		request := mcp.CallToolRequest{
-			Params: struct {
-				Name      string    `json:"name"`
-				Arguments any       `json:"arguments,omitempty"`
-				Meta      *mcp.Meta `json:"_meta,omitempty"`
-			}{
+			Params: mcp.CallToolParams{
 				Name: "sensitive_tool",
 				Arguments: map[string]interface{}{
 					"sensitiveData": "user@example.com",
@@ -601,11 +614,7 @@ func TestToolTracingInstrumentation(t *testing.T) {
 
 		// Create a mock MCP request
 		request := mcp.CallToolRequest{
-			Params: struct {
-				Name      string    `json:"name"`
-				Arguments any       `json:"arguments,omitempty"`
-				Meta      *mcp.Meta `json:"_meta,omitempty"`
-			}{
+			Params: mcp.CallToolParams{
 				Name: "debug_tool",
 				Arguments: map[string]interface{}{
 					"safeData": "debug-value",
@@ -634,6 +643,37 @@ func TestToolTracingInstrumentation(t *testing.T) {
 	})
 }
 
+func TestTextMimeConsumerOverride(t *testing.T) {
+	// Verify that NewGrafanaClient overrides text/plain and text/html consumers
+	// with JSON consumers so that responses with incorrect content-type headers
+	// (e.g. from Grafana v12 or reverse proxies) are still parsed correctly.
+	// See: https://github.com/grafana/mcp-grafana/issues/635
+	ctx := WithGrafanaConfig(context.Background(), GrafanaConfig{})
+	c := NewGrafanaClient(ctx, "http://localhost:3000", "test-api-key", nil)
+	require.NotNil(t, c)
+
+	rt, ok := c.Transport.(*client.Runtime)
+	require.True(t, ok, "expected Transport to be *client.Runtime")
+
+	// The text/plain and text/html consumers should no longer be the default
+	// TextConsumer. Verify by checking they can consume a JSON object into a
+	// map (TextConsumer would fail on this).
+	for _, mime := range []string{"text/plain", "text/html"} {
+		consumer, exists := rt.Consumers[mime]
+		require.True(t, exists, "consumer for %s should exist", mime)
+		require.NotNil(t, consumer, "consumer for %s should not be nil", mime)
+
+		// JSONConsumer can unmarshal into a map; TextConsumer cannot.
+		var result map[string]interface{}
+		err := consumer.Consume(
+			strings.NewReader(`{"status":"ok"}`),
+			&result,
+		)
+		assert.NoError(t, err, "consumer for %s should parse JSON", mime)
+		assert.Equal(t, "ok", result["status"], "consumer for %s should return parsed value", mime)
+	}
+}
+
 func TestHTTPTracingConfiguration(t *testing.T) {
 	t.Run("HTTP tracing always enabled for context propagation", func(t *testing.T) {
 		// Create context (HTTP tracing always enabled)
@@ -641,7 +681,7 @@ func TestHTTPTracingConfiguration(t *testing.T) {
 		ctx := WithGrafanaConfig(context.Background(), config)
 
 		// Create Grafana client
-		client := NewGrafanaClient(ctx, "http://localhost:3000", "test-api-key", nil, 0)
+		client := NewGrafanaClient(ctx, "http://localhost:3000", "test-api-key", nil)
 		require.NotNil(t, client)
 
 		// Verify the client was created successfully (should not panic)
@@ -656,7 +696,7 @@ func TestHTTPTracingConfiguration(t *testing.T) {
 		ctx := WithGrafanaConfig(context.Background(), config)
 
 		// Create Grafana client (should not panic even without OTEL configured)
-		client := NewGrafanaClient(ctx, "http://localhost:3000", "test-api-key", nil, 0)
+		client := NewGrafanaClient(ctx, "http://localhost:3000", "test-api-key", nil)
 		require.NotNil(t, client)
 
 		// Verify the client was created successfully
@@ -720,7 +760,6 @@ func assertHasAttribute(t *testing.T, attributes []attribute.KeyValue, key strin
 	}
 	t.Errorf("Expected attribute %s with value %s not found", key, expectedValue)
 }
-
 
 func TestExtraHeadersFromEnv(t *testing.T) {
 	t.Run("empty env returns nil", func(t *testing.T) {
@@ -826,6 +865,154 @@ func TestExtractGrafanaInfoWithExtraHeaders(t *testing.T) {
 	})
 }
 
+func TestForwardHeaderNamesFromEnv(t *testing.T) {
+	t.Run("empty env returns nil", func(t *testing.T) {
+		t.Setenv("GRAFANA_FORWARD_HEADERS", "")
+		names := forwardHeaderNamesFromEnv()
+		assert.Nil(t, names)
+	})
+
+	t.Run("single header", func(t *testing.T) {
+		t.Setenv("GRAFANA_FORWARD_HEADERS", "Cookie")
+		names := forwardHeaderNamesFromEnv()
+		assert.Equal(t, []string{"Cookie"}, names)
+	})
+
+	t.Run("multiple headers with spaces", func(t *testing.T) {
+		t.Setenv("GRAFANA_FORWARD_HEADERS", " Cookie , X-Session-Id , X-Request-Id ")
+		names := forwardHeaderNamesFromEnv()
+		assert.Equal(t, []string{"Cookie", "X-Session-Id", "X-Request-Id"}, names)
+	})
+
+	t.Run("trailing comma ignored", func(t *testing.T) {
+		t.Setenv("GRAFANA_FORWARD_HEADERS", "Cookie,")
+		names := forwardHeaderNamesFromEnv()
+		assert.Equal(t, []string{"Cookie"}, names)
+	})
+}
+
+func TestForwardedHeadersFromRequest(t *testing.T) {
+	t.Run("no env returns nil", func(t *testing.T) {
+		t.Setenv("GRAFANA_FORWARD_HEADERS", "")
+		req, _ := http.NewRequest("GET", "http://example.com", nil)
+		req.Header.Set("Cookie", "session=abc")
+		assert.Nil(t, forwardedHeadersFromRequest(req))
+	})
+
+	t.Run("header present in request", func(t *testing.T) {
+		t.Setenv("GRAFANA_FORWARD_HEADERS", "Cookie")
+		req, _ := http.NewRequest("GET", "http://example.com", nil)
+		req.Header.Set("Cookie", "session=abc")
+		forwarded := forwardedHeadersFromRequest(req)
+		assert.Equal(t, map[string]string{"Cookie": "session=abc"}, forwarded)
+	})
+
+	t.Run("header missing from request returns nil", func(t *testing.T) {
+		t.Setenv("GRAFANA_FORWARD_HEADERS", "Cookie")
+		req, _ := http.NewRequest("GET", "http://example.com", nil)
+		assert.Nil(t, forwardedHeadersFromRequest(req))
+	})
+
+	t.Run("multiple headers partial match", func(t *testing.T) {
+		t.Setenv("GRAFANA_FORWARD_HEADERS", "Cookie,X-Session-Id")
+		req, _ := http.NewRequest("GET", "http://example.com", nil)
+		req.Header.Set("Cookie", "session=abc")
+		forwarded := forwardedHeadersFromRequest(req)
+		assert.Equal(t, map[string]string{"Cookie": "session=abc"}, forwarded)
+	})
+}
+
+func TestMergeHeaders(t *testing.T) {
+	t.Run("both nil", func(t *testing.T) {
+		assert.Nil(t, mergeHeaders(nil, nil))
+	})
+
+	t.Run("base only", func(t *testing.T) {
+		result := mergeHeaders(map[string]string{"A": "1"}, nil)
+		assert.Equal(t, map[string]string{"A": "1"}, result)
+	})
+
+	t.Run("override only", func(t *testing.T) {
+		result := mergeHeaders(nil, map[string]string{"B": "2"})
+		assert.Equal(t, map[string]string{"B": "2"}, result)
+	})
+
+	t.Run("override wins on conflict", func(t *testing.T) {
+		base := map[string]string{"A": "1", "B": "2"}
+		override := map[string]string{"B": "override", "C": "3"}
+		result := mergeHeaders(base, override)
+		assert.Equal(t, map[string]string{"A": "1", "B": "override", "C": "3"}, result)
+	})
+
+	t.Run("case-insensitive header merge: override wins", func(t *testing.T) {
+		base := map[string]string{"cookie": "static"}
+		override := map[string]string{"Cookie": "from-request"}
+		result := mergeHeaders(base, override)
+		assert.Len(t, result, 1)
+		assert.Equal(t, "from-request", result["Cookie"], "forwarded request value must win over extra header")
+	})
+}
+
+func TestExtractGrafanaInfoFromHeadersForwardedHeaders(t *testing.T) {
+	t.Run("forwarded headers merged into config", func(t *testing.T) {
+		t.Setenv("GRAFANA_EXTRA_HEADERS", `{"X-Tenant-ID": "tenant-123"}`)
+		t.Setenv("GRAFANA_FORWARD_HEADERS", "Cookie")
+		req, _ := http.NewRequest("GET", "http://example.com", nil)
+		req.Header.Set("Cookie", "session=user1")
+
+		ctx := ExtractGrafanaInfoFromHeaders(context.Background(), req)
+		config := GrafanaConfigFromContext(ctx)
+		assert.Equal(t, map[string]string{
+			"X-Tenant-Id": "tenant-123",
+			"Cookie":      "session=user1",
+		}, config.ExtraHeaders)
+	})
+
+	t.Run("forwarded header overrides extra header with same name", func(t *testing.T) {
+		t.Setenv("GRAFANA_EXTRA_HEADERS", `{"Cookie": "static-cookie"}`)
+		t.Setenv("GRAFANA_FORWARD_HEADERS", "Cookie")
+		req, _ := http.NewRequest("GET", "http://example.com", nil)
+		req.Header.Set("Cookie", "dynamic-cookie")
+
+		ctx := ExtractGrafanaInfoFromHeaders(context.Background(), req)
+		config := GrafanaConfigFromContext(ctx)
+		assert.Equal(t, "dynamic-cookie", config.ExtraHeaders["Cookie"])
+	})
+
+	t.Run("no forward env uses only extra headers", func(t *testing.T) {
+		t.Setenv("GRAFANA_EXTRA_HEADERS", `{"X-Tenant-ID": "tenant-789"}`)
+		t.Setenv("GRAFANA_FORWARD_HEADERS", "")
+		req, _ := http.NewRequest("GET", "http://example.com", nil)
+		req.Header.Set("Cookie", "session=ignored")
+
+		ctx := ExtractGrafanaInfoFromHeaders(context.Background(), req)
+		config := GrafanaConfigFromContext(ctx)
+		assert.Equal(t, map[string]string{"X-Tenant-ID": "tenant-789"}, config.ExtraHeaders)
+	})
+
+	t.Run("forward header not present in request", func(t *testing.T) {
+		t.Setenv("GRAFANA_EXTRA_HEADERS", "")
+		t.Setenv("GRAFANA_FORWARD_HEADERS", "Cookie")
+		req, _ := http.NewRequest("GET", "http://example.com", nil)
+
+		ctx := ExtractGrafanaInfoFromHeaders(context.Background(), req)
+		config := GrafanaConfigFromContext(ctx)
+		assert.Nil(t, config.ExtraHeaders)
+	})
+
+	t.Run("forwarded Cookie wins when extra headers has lowercase cookie", func(t *testing.T) {
+		t.Setenv("GRAFANA_EXTRA_HEADERS", `{"cookie": "static"}`)
+		t.Setenv("GRAFANA_FORWARD_HEADERS", "Cookie")
+		req, _ := http.NewRequest("GET", "http://example.com", nil)
+		req.Header.Set("Cookie", "session=user2")
+
+		ctx := ExtractGrafanaInfoFromHeaders(context.Background(), req)
+		config := GrafanaConfigFromContext(ctx)
+		assert.Len(t, config.ExtraHeaders, 1)
+		assert.Equal(t, "session=user2", config.ExtraHeaders["Cookie"], "incoming request must take precedence regardless of extra header key case")
+	})
+}
+
 func TestOrgIDRoundTripper(t *testing.T) {
 	t.Run("adds org ID header to request", func(t *testing.T) {
 		var capturedReq *http.Request
@@ -897,7 +1084,7 @@ func TestNewGrafanaClientOrgIDTransport(t *testing.T) {
 		ctx := WithGrafanaConfig(context.Background(), GrafanaConfig{
 			OrgID: 99,
 		})
-		c := NewGrafanaClient(ctx, ts.URL, "test-key", nil, 99)
+		c := NewGrafanaClient(ctx, ts.URL, "test-key", nil)
 		require.NotNil(t, c)
 
 		// Make a real request through the client
@@ -917,7 +1104,7 @@ func TestNewGrafanaClientOrgIDTransport(t *testing.T) {
 		ctx := WithGrafanaConfig(context.Background(), GrafanaConfig{
 			OrgID: 0,
 		})
-		c := NewGrafanaClient(ctx, ts.URL, "test-key", nil, 0)
+		c := NewGrafanaClient(ctx, ts.URL, "test-key", nil)
 		require.NotNil(t, c)
 
 		_, _ = c.Search.Search(nil, nil)
@@ -1031,7 +1218,7 @@ func TestFetchPublicURL(t *testing.T) {
 		})
 
 		extraHeaders := map[string]string{
-			"X-Custom-Auth": "proxy-token-123",
+			"X-Custom-Auth":   "proxy-token-123",
 			"X-Forwarded-For": "10.0.0.1",
 		}
 		fetchPublicURL(context.Background(), ts.URL, "", nil, nil, extraHeaders)
@@ -1102,7 +1289,7 @@ func TestNewGrafanaClientFetchesPublicURL(t *testing.T) {
 		})
 
 		ctx := WithGrafanaConfig(context.Background(), GrafanaConfig{})
-		gc := NewGrafanaClient(ctx, ts.URL, "test-key", nil, 0)
+		gc := NewGrafanaClient(ctx, ts.URL, "test-key", nil)
 		assert.Equal(t, "https://public.grafana.example.com", gc.PublicURL)
 	})
 
@@ -1117,7 +1304,7 @@ func TestNewGrafanaClientFetchesPublicURL(t *testing.T) {
 		})
 
 		ctx := WithGrafanaConfig(context.Background(), GrafanaConfig{})
-		gc := NewGrafanaClient(ctx, ts.URL, "test-key", nil, 0)
+		gc := NewGrafanaClient(ctx, ts.URL, "test-key", nil)
 		assert.Equal(t, "", gc.PublicURL)
 	})
 }
